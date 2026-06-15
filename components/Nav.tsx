@@ -9,10 +9,21 @@ export function Nav() {
   const pathname = usePathname()
   const { data: session } = useSession()
 
+  const role = (session?.user as any)?.role
+
   const links = session
     ? [
-        { href: "/dashboard", label: "Dashboard", icon: Gauge },
-        { href: "/uploads", label: "Uploads", icon: Upload },
+        ...(role === "STUDENT" ? [{ href: "/dashboard", label: "Dashboard", icon: Gauge }] : []),
+        ...(role === "TEACHER" || role === "ADMIN"
+          ? [
+              { href: "/teacher", label: "Dashboard", icon: Gauge },
+              { href: "/teacher/uploads", label: "Uploads", icon: Upload },
+            ]
+          : []),
+        ...(role === "ADMIN" ? [{ href: "/admin", label: "Admin", icon: Gauge }] : []),
+        ...(role === "CREATOR" || role === "ADMIN"
+          ? [{ href: "/creator", label: "Creator", icon: Upload }]
+          : []),
       ]
     : []
 

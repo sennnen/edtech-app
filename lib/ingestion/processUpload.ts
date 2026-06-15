@@ -1,8 +1,18 @@
 import { prisma } from "@/lib/prisma"
-import type { UploadStatus } from "@prisma/client"
+import type { ExamBoard, UploadStatus } from "@prisma/client"
 import { getOrCreateParsingTemplate } from "@/lib/ingestion/parsingTemplate"
 
-export async function processUpload(uploadId: string): Promise<{ success: boolean; manualReview?: boolean; errors?: string[] }> {
+interface ProcessOptions {
+  subject?: string
+  examBoard?: string
+  specCode?: string
+  forceMapping?: Record<string, string> | null
+}
+
+export async function processUpload(
+  uploadId: string,
+  opts: ProcessOptions = {}
+): Promise<{ success: boolean; manualReview?: boolean; errors?: string[] }> {
   const upload = await prisma.mockSpreadsheetUpload.findUnique({
     where: { id: uploadId },
     include: {
@@ -25,22 +35,33 @@ export async function processUpload(uploadId: string): Promise<{ success: boolea
   }
 
   const sample = rawData.slice(0, 3)
-
   await setStatus(upload.id, "COMPILING")
 
-  const result = await getOrCreateParsingTemplate({
-    organizationId: upload.class.orgId,
-    subject: "General",
-    examBoard: "AQA" as any,
-    sample,
-  })
+  const subject = opts.subject || "General"
+  const examBoard = (opts.examBoard || "AQA") as ExamBoard
 
-  if (result.manualReview || !result.template) {
-    await setStatus(upload.id, "MANUAL_REVIEW")
-    return { success: false, manualReview: true, errors: result.errors }
+  let schema: Record<string, string>
+
+  if (opts.forceMapping) {
+    const filtered = Object.fromEntries(
+      Object.entries(opts.forceMapping).filter(([, v]) => v !== "ignore")
+    )
+    schema = filtered
+  } else {
+    const result = await getOrCreateParsingTemplate({
+      organizationId: upload.class.orgId,
+      subject,
+      examBoard,
+      sample,
+    })
+
+    if (result.manualReview || !result.template) {
+      await setStatus(upload.id, "MANUAL_REVIEW")
+      return { success: false, manualReview: true, errors: result.errors }
+    }
+
+    schema = result.template.schema
   }
-
-  const { schema } = result.template
 
   const sourceToStudentName = findSourceKey(schema, "student_name")
   const sourceToScore = findSourceKey(schema, "mock_score")
@@ -76,9 +97,9 @@ export async function processUpload(uploadId: string): Promise<{ success: boolea
       topic = await prisma.syllabusTopic.create({
         data: {
           title: topicStr,
-          board: "AQA",
-          subject: "General",
-          specCode: "GEN",
+          board: examBoard,
+          subject,
+          specCode: opts.specCode || "GEN",
         },
       })
     }

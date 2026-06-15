@@ -1,23 +1,19 @@
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
-import { redirect } from "next/navigation"
+import { requireStudent } from "@/lib/guard"
 import { prisma } from "@/lib/prisma"
 import Link from "next/link"
-import { ChartBar, Video, GraduationCap, ArrowRight } from "@phosphor-icons/react/dist/ssr"
+import { ChartBar, Video, GraduationCap, BookOpen, ArrowRight } from "@phosphor-icons/react/dist/ssr"
 
 export default async function StudentDashboard() {
-  const session = await getServerSession(authOptions)
-
-  if (!session?.user) {
-    redirect("/login")
-  }
+  const session = await requireStudent()
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
     include: {
       studentProfile: {
         include: {
-          class: true,
+          class: {
+            include: { organization: true },
+          },
           weaknesses: {
             include: { topic: true },
             orderBy: { masteryLevel: "asc" },
@@ -38,13 +34,6 @@ export default async function StudentDashboard() {
           <p className="text-zinc-500 text-sm mb-6">
             Your teacher needs to add you to a class. Uploaded mock results will create your profile automatically.
           </p>
-          <Link
-            href="/uploads"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-800 transition-colors"
-          >
-            Go to uploads
-            <ArrowRight size={16} />
-          </Link>
         </div>
       </div>
     )
@@ -58,23 +47,27 @@ export default async function StudentDashboard() {
       ? student.weaknesses.reduce((s, w) => s + w.masteryLevel, 0) / student.weaknesses.length
       : 0
 
-  const recommendedVideo = await prisma.video.findFirst({
-    where: weakTopics.length > 0 ? { primaryTopicId: weakTopics[0].topicId } : undefined,
-    include: { cuePoints: true },
-  })
+  const weakestTopic = weakTopics[0]
 
   return (
     <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-      <div className="flex items-center justify-between mb-10">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-10 gap-4">
         <div>
           <h1 className="text-3xl font-bold text-zinc-900">Dashboard</h1>
           <p className="text-zinc-500 mt-1">
             {student.name} &middot; {student.class?.name || "No class"}
           </p>
         </div>
-        <div className="text-right">
-          <p className="text-sm text-zinc-500">Overall mastery</p>
-          <p className="text-2xl font-bold text-zinc-900">{Math.round(avgMastery * 100)}%</p>
+        <div className="flex items-center gap-4">
+          {student.class?.organization && (
+            <span className="text-xs text-zinc-400 bg-zinc-100 px-3 py-1.5 rounded-full">
+              {student.class.organization.name}
+            </span>
+          )}
+          <div className="text-right">
+            <p className="text-xs text-zinc-500">Overall mastery</p>
+            <p className="text-2xl font-bold text-zinc-900">{Math.round(avgMastery * 100)}%</p>
+          </div>
         </div>
       </div>
 
@@ -82,13 +75,20 @@ export default async function StudentDashboard() {
         <section className="mb-10">
           <div className="flex items-center gap-2 mb-4">
             <ChartBar size={18} className="text-zinc-500" />
-            <h2 className="text-lg font-semibold text-zinc-900">Areas to improve</h2>
+            <h2 className="text-lg font-semibold text-zinc-900">Top 3 weakest topics</h2>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {weakTopics.map((w) => (
-              <div key={w.id} className="bg-white border border-zinc-200 rounded-2xl p-5">
+            {weakTopics.slice(0, 3).map((w) => (
+              <Link
+                key={w.id}
+                href={`/student/topics/${w.topicId}`}
+                className="block bg-white border border-zinc-200 rounded-2xl p-5 hover:border-zinc-300 transition-colors group"
+              >
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-medium text-zinc-900 text-sm">{w.topic.title}</h3>
+                  <div>
+                    <h3 className="font-medium text-zinc-900 text-sm">{w.topic.title}</h3>
+                    <p className="text-xs text-zinc-400 mt-0.5">{w.topic.board} &middot; {w.topic.specCode}</p>
+                  </div>
                   <span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
                     {Math.round(w.masteryLevel * 100)}%
                   </span>
@@ -99,8 +99,34 @@ export default async function StudentDashboard() {
                     style={{ width: `${w.masteryLevel * 100}%` }}
                   />
                 </div>
-              </div>
+              </Link>
             ))}
+          </div>
+        </section>
+      )}
+
+      {weakestTopic && (
+        <section className="mb-10">
+          <div className="flex items-center gap-2 mb-4">
+            <Video size={18} className="text-zinc-500" />
+            <h2 className="text-lg font-semibold text-zinc-900">Recommended action</h2>
+          </div>
+          <div className="bg-white border border-zinc-200 rounded-2xl p-6">
+            <p className="text-sm text-zinc-700 mb-1">Focus on <strong>{weakestTopic.topic.title}</strong></p>
+            <p className="text-xs text-zinc-400 mb-4">
+              {weakestTopic.topic.board} &middot; {weakestTopic.topic.subject} &middot; Spec: {weakestTopic.topic.specCode}
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <span className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-zinc-100 text-zinc-700">
+                <Video size={14} />
+                Interactive video
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-zinc-100 text-zinc-700">
+                <BookOpen size={14} />
+                Practice quiz
+              </span>
+            </div>
+            {/* [TODO] Flashcard decks, spaced repetition */}
           </div>
         </section>
       )}
@@ -115,7 +141,10 @@ export default async function StudentDashboard() {
             {strongTopics.map((w) => (
               <div key={w.id} className="bg-white border border-zinc-200 rounded-2xl p-5">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-medium text-zinc-900 text-sm">{w.topic.title}</h3>
+                  <div>
+                    <h3 className="font-medium text-zinc-900 text-sm">{w.topic.title}</h3>
+                    <p className="text-xs text-zinc-400 mt-0.5">{w.topic.board}</p>
+                  </div>
                   <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
                     {Math.round(w.masteryLevel * 100)}%
                   </span>
@@ -129,27 +158,6 @@ export default async function StudentDashboard() {
               </div>
             ))}
           </div>
-        </section>
-      )}
-
-      {recommendedVideo && (
-        <section>
-          <div className="flex items-center gap-2 mb-4">
-            <Video size={18} className="text-zinc-500" />
-            <h2 className="text-lg font-semibold text-zinc-900">{recommendedVideo.title}</h2>
-          </div>
-          {recommendedVideo.muxPlaybackId ? (
-            <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden">
-              <div className="aspect-video bg-zinc-100 flex items-center justify-center text-zinc-400 text-sm">
-                Video player — add MUX_TOKEN_ID & MUX_TOKEN_SECRET to .env
-              </div>
-            </div>
-          ) : (
-            <div className="bg-white border border-zinc-200 rounded-2xl p-8 text-center">
-              <Video size={32} className="text-zinc-300 mx-auto mb-3" />
-              <p className="text-sm text-zinc-500">No video configured yet</p>
-            </div>
-          )}
         </section>
       )}
 
