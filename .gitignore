@@ -33,5 +33,5 @@ next-env.d.ts
 # docker
 docker-data/
 
-# prisma
-prisma/migrations/
+# prisma (keep migrations for deployment)
+# prisma/migrations/
