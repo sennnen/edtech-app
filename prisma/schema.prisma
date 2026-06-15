@@ -1,0 +1,185 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// --- ENUMS ---
+enum UserRole {
+  ADMIN
+  TEACHER
+  STUDENT
+  CREATOR
+}
+
+enum ExamBoard {
+  AQA
+  EDEXCEL
+  OCR
+}
+
+enum UploadStatus {
+  PENDING
+  COMPILING
+  COMPLETED
+  MANUAL_REVIEW
+}
+
+// --- CORE MODELS ---
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  licenseKey  String   @unique
+  classes     Class[]
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  hashedPassword String?
+  role           UserRole
+  name           String?
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  studentProfile Student?
+  classes        Class[]     @relation("TeacherClasses")
+  createdContent Video[]     @relation("CreatorContent")
+
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+}
+
+model Student {
+  id        String  @id @default(cuid())
+  name      String
+  classId   String
+  class     Class    @relation(fields: [classId], references: [id])
+  userId    String?  @unique
+  profile   User?    @relation(fields: [userId], references: [id])
+
+  weaknesses StudentWeakness[]
+  responses  QuestionResponse[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Class {
+  id            String   @id @default(cuid())
+  name          String
+  orgId         String
+  organization  Organization @relation(fields: [orgId], references: [id])
+  teacherId     String
+  teacher       User      @relation("TeacherClasses", fields: [teacherId], references: [id])
+
+  students      Student[]
+  uploads       MockSpreadsheetUpload[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// --- INGESTION ENGINE ---
+model ParsingTemplate {
+  id             String   @id @default(cuid())
+  organizationId String
+  subject        String
+  examBoard      ExamBoard
+  schema         Json
+  confidence     Float
+  modelName      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId, subject, examBoard])
+}
+
+model MockSpreadsheetUpload {
+  id            String        @id @default(cuid())
+  fileUrl       String
+  rawJson       Json
+  status        UploadStatus  @default(PENDING)
+  parsingSchema Json?
+  classId       String
+  class         Class         @relation(fields: [classId], references: [id])
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([classId, status])
+}
+
+// --- PEDAGOGY & CONTENT ---
+model SyllabusTopic {
+  id         String    @id @default(cuid())
+  title      String
+  board      ExamBoard
+  subject    String
+  specCode   String
+  weaknesses StudentWeakness[]
+  videos      Video[]
+  cuePoints   VideoCuePoint[]
+
+  @@index([board, specCode, subject])
+}
+
+model StudentWeakness {
+  id           String        @id @default(cuid())
+  studentId    String
+  student      Student        @relation(fields: [studentId], references: [id])
+  topicId      String
+  topic        SyllabusTopic  @relation(fields: [topicId], references: [id])
+  masteryLevel Float
+  lastTestedAt DateTime?
+
+  @@index([studentId, topicId])
+}
+
+model Video {
+  id            String        @id @default(cuid())
+  title         String
+  muxAssetId    String
+  muxPlaybackId String?
+  creatorId     String
+  creator       User          @relation("CreatorContent", fields: [creatorId], references: [id])
+  primaryTopicId String?
+  primaryTopic   SyllabusTopic? @relation(fields: [primaryTopicId], references: [id])
+  cuePoints     VideoCuePoint[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model VideoCuePoint {
+  id           String        @id @default(cuid())
+  videoId      String
+  video        Video          @relation(fields: [videoId], references: [id])
+  timestamp    Float
+  questionText String
+  correctAnswer String
+  jumpToTime   Float?
+  topicId      String?
+  topic        SyllabusTopic? @relation(fields: [topicId], references: [id])
+  responses    QuestionResponse[]
+}
+
+model QuestionResponse {
+  id             String   @id @default(cuid())
+  studentId      String
+  student        Student  @relation(fields: [studentId], references: [id])
+  cuePointId     String?
+  cuePoint       VideoCuePoint? @relation(fields: [cuePointId], references: [id])
+  isCorrect      Boolean
+  rawAnswer      Json?
+  marksAwarded   Float?
+  marksAvailable Float?
+  answeredAt     DateTime @default(now())
+
+  @@index([studentId, answeredAt])
+}
